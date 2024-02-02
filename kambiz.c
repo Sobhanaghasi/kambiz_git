@@ -27,13 +27,15 @@ bool init_done = false;
 char current_branch_name[MAX_STRING_LENGTH] = "";
 int last_commit_id;
 
-time_t string_to_time(char time_string[]){
+time_t string_to_time(char time_string[])
+{
     time_t time_pointer;
     struct tm temp;
-    if (strptime(time_string, "%Y/%m/%d %H:%M:%S", &temp) == NULL){
+    if (strptime(time_string, "%Y/%m/%d-%H:%M:%S", &temp) == NULL)
+    {
         return -1;
     }
-    return(mktime(&temp));
+    return (mktime(&temp));
 }
 
 void split_by_chars(char source[], char destination1[], char destination2[], char splitters[])
@@ -739,10 +741,9 @@ int commit(char message[])
         return -1;
     }
 
-    
     time_t current_time = time(NULL);
     char current_time_string[MAX_STRING_LENGTH];
-    strftime(current_time_string, sizeof(current_time_string), "%Y/%m/%d %H:%M:%S", localtime(current_time));
+    strftime(current_time_string, sizeof(current_time_string), "%Y/%m/%d-%H:%M:%S", localtime(&current_time));
 
     fprintf(stdout, "%d staged files successfully commited at %s (Commit-ID: %d)", commited_files_count, current_time_string, commit_id);
     char commit_log_line[10000] = "";
@@ -784,16 +785,18 @@ int branch(char new_branch_name[])
     char command[MAX_FULL_COMMAND_LENGTH] = "";
     sprintf(command, "rsync -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/0", current_branch_name, current_branch_head_id, new_branch_name);
     system(command);
+
+    return 1;
 }
 
 int checkout_branch(char branch_name[])
 {
-    //
+    return 1;
 }
 
-int log(char option[], char** arguments)
+int log_filter(char option[], char **arguments, int arguments_count)
 {
-    FILE *commit_log_file = fopen(".kambiz/branches/commit_log.txt", "w");
+    FILE *commit_log_file = fopen(".kambiz/branches/commit_log.txt", "r");
     char line[601];
 
     bool filter_n = (strcmp(option, "-n") == 0);
@@ -801,61 +804,106 @@ int log(char option[], char** arguments)
     bool filter_branch = (strcmp(option, "-branch") == 0);
     bool filter_since = (strcmp(option, "-since") == 0);
     bool filter_before = (strcmp(option, "-before") == 0);
+    bool filter_word = (strcmp(option, "-search") == 0);
 
     int n;
     int log_counter;
-    if(filter_n){
+    if (filter_n)
+    {
         log_counter = 0;
-        n;
         sscanf(arguments[0], "%d", &n);
     }
 
     time_t wanted_time;
-    if (filter_since || filter_before){
+    if (filter_since || filter_before)
+    {
         wanted_time = string_to_time(arguments[0]);
-        if (wanted_time = -1){
+        if (wanted_time == -1)
+        {
             fprintf(stderr, "Time should be in YYYY/mm/dd HH:MM:SS format");
             return -1;
         }
     }
 
-    while(fscanf(commit_log_file, "%[^\n]s", line) != EOF){
-        if (filter_n){
+    while (fscanf(commit_log_file, "%[^\n]s", line) != EOF)
+    {
+        char id[101];
+        char author[101];
+        char branch[101];
+        char time[101];
+        char message[101];
+        char commited_files_count[101];
+        sscanf(line, "%100s%100s%100s%100s%100s%100s", id, branch, author, time, commited_files_count, message);
+
+        if (filter_n)
+        {
             log_counter++;
-            if (log_counter > n){
+            if (log_counter > n)
+            {
                 break;
             }
         }
-        if (filter_author){
-            char author[101];
+        if (filter_author)
+        {
+
             sscanf(line + 200, "%100s", author);
-            if (strcmp(author, arguments[0]) != 0){
-                break;
+            if (strcmp(author, arguments[0]) != 0)
+            {
+                scanf("\n");
+                continue;
             }
         }
-        if (filter_branch){
-            char branch[101];
+        if (filter_branch)
+        {
+
             sscanf(line + 100, "%100s", branch);
-            if (strcmp(branch, arguments[0]) != 0){
-                break;
+            if (strcmp(branch, arguments[0]) != 0)
+            {
+                scanf("\n");
+                continue;
             }
         }
-        if (filter_since){
-            char time[101];
-            sscanf(line + 200, "%100s", time);
-            if (string_to_time(time) < wanted_time){
-                break;
+        if (filter_since)
+        {
+            sscanf(line + 300, "%100s", time);
+            if (string_to_time(time) < wanted_time)
+            {
+                scanf("\n");
+                continue;
             }
         }
-        if (filter_before){
-            char time[101];
-            sscanf(line + 200, "%100s", time);
-            if (string_to_time(time) > wanted_time){
-                break;
+        if (filter_before)
+        {
+            sscanf(line + 300, "%100s", time);
+            if (string_to_time(time) > wanted_time)
+            {
+                scanf("\n");
+                continue;
             }
         }
-        printf("%s\n", line);
+        if (filter_word)
+        {
+            bool found_word = false;
+            sscanf(line + 500, "%100s", message);
+            for (int i = 0; i < arguments_count; i++)
+            {
+                if (strstr(message, arguments[i]) != NULL)
+                {
+                    found_word = true;
+                    break;
+                }
+            }
+            if (!found_word)
+            {
+                scanf("\n");
+                continue;
+            }
+        }
+        printf("Commit-ID: %s | Branch: %s | Author: %s | Time: %s | Files_count: %s | Message: \"%s\"\n",
+               id, branch, author, time, commited_files_count, message);
+        scanf("\n");
     }
+    return 1;
 }
 
 int main(int argc, char **argv)
@@ -1001,6 +1049,20 @@ int main(int argc, char **argv)
         }
     }
 
+    if (strcmp(argv[1], "commit") == 0)
+    {
+        if (argc == 3)
+        {
+            fprintf(stderr, "Please enter a message");
+            return -1;
+        }
+        else if (argc == 4)
+        {
+            commit(argv[3]);
+            return 0;
+        }
+    }
+
     if (strcmp(argv[1], "branch") == 0)
     {
         if (argc == 2)
@@ -1045,12 +1107,17 @@ int main(int argc, char **argv)
     {
         if (argc == 2)
         {
-            log();
+            log_filter("", argv + 2, 0);
             return 0;
         }
         if (argc == 3)
         {
-            branch(argv[2]);
+            log_filter(argv[2], argv + 2, 1);
+            return 0;
+        }
+        if (strcmp(argv[1], "log") == 0)
+        {
+            log_filter(argv[2], argv + 2, argc - 3);
             return 0;
         }
     }
