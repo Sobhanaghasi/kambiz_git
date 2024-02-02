@@ -1,6 +1,5 @@
 // To Be Done:
 // Alias Check
-// Second Commit
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +28,6 @@ int last_commit_id;
 
 time_t string_to_time(char time_string[])
 {
-    time_t time_pointer;
     struct tm temp;
     if (strptime(time_string, "%Y/%m/%d-%H:%M:%S", &temp) == NULL)
     {
@@ -179,10 +177,12 @@ struct dirent *search_in_directory(DIR *directory, char name[], int type)
         {
             if (strcmp(name, entry->d_name) == 0)
             {
+                rewinddir(directory);
                 return entry;
             }
         }
     }
+    rewinddir(directory);
     return NULL;
 }
 
@@ -260,6 +260,62 @@ bool is_similar(char address1[], char address2[], int type)
     }
 }
 
+bool able_to_checkout()
+{
+    bool changes_commited = true;
+    char last_commit_folder_address[MAX_PATH_LENGTH];
+    sprintf(last_commit_folder_address, ".kambiz/branches/%s/%d", current_branch_name, find_branch_head_n_id(current_branch_name, 1));
+    DIR *last_commit_folder = opendir(last_commit_folder_address);
+    DIR *working_tree = opendir(".");
+    struct dirent *last_commit_entry;
+    while ((last_commit_entry = readdir(last_commit_folder)) != NULL)
+    {
+        if (((last_commit_entry->d_type != DT_DIR) && (last_commit_entry->d_type != DT_REG)) ||
+            (last_commit_entry->d_name[0] == '.'))
+        {
+            continue;
+        }
+
+        if (search_in_directory(working_tree, last_commit_entry->d_name, last_commit_entry->d_type) != NULL)
+        {
+            char last_commit_file_address[MAX_PATH_LENGTH];
+            sprintf(last_commit_file_address, "%s/%s", last_commit_folder_address, last_commit_entry->d_name);
+            if (!is_similar(last_commit_file_address, last_commit_entry->d_name, last_commit_entry->d_type))
+            {
+                fprintf(stderr, "Can't checkout: Changes or deletions not commited\n");
+                closedir(last_commit_folder);
+                closedir(working_tree);
+                return false;
+            }
+        }
+        else
+        {
+            fprintf(stderr, "Can't checkout: Changes or deletions not commited\n");
+            closedir(last_commit_folder);
+            closedir(working_tree);
+            return false;
+        }
+    }
+
+    DIR *stage = opendir(".kambiz/stage");
+    struct dirent *staged_entry;
+    while ((staged_entry = readdir(stage)) != NULL)
+    {
+        if (((staged_entry->d_type != DT_DIR) && (staged_entry->d_type != DT_REG)) ||
+            (staged_entry->d_name[0] == '.'))
+        {
+            continue;
+        }
+
+        fprintf(stderr, "Can't checkout: Staging area not empty\n");
+        closedir(stage);
+        return false;
+    }
+    closedir(stage);
+
+    return true;
+}
+
 int init()
 {
     char temp_address[MAX_PATH_LENGTH];
@@ -299,6 +355,10 @@ int init()
     char add_log_address[MAX_PATH_LENGTH] = ".kambiz/add_log.txt";
     FILE *add_log_file = fopen(add_log_address, "w");
     fclose(add_log_file);
+
+    char deleting_stage_address[MAX_PATH_LENGTH] = ".kambiz/deleting_stage.txt";
+    FILE *deleting_stage_file = fopen(deleting_stage_address, "w");
+    fclose(deleting_stage_file);
 
     mkdir(".kambiz/stage", 0777);
     mkdir(".kambiz/branches", 0777);
@@ -472,14 +532,54 @@ int add(char **file_addresses, int file_count)
         {
             add_done = true;
             char command[MAX_FULL_COMMAND_LENGTH] = "";
-            sprintf(command, "rsync -r \"%s\" \".kambiz/stage/%s/\"", file_addresses[i], folder_address);
-            system(command);
+            sprintf(command, "cp -r \"%s\" \".kambiz/stage/%s/\" 2>/dev/null", file_addresses[i], folder_address);
+            if (system(command) != 0)
+            {
+                char pre_command[MAX_FULL_COMMAND_LENGTH] = "";
+                sprintf(pre_command, "mkdir -p \".kambiz/stage/%s\"", folder_address);
+                system(pre_command);
+                system(command);
+            }
             fprintf(stdout, "\"%s\" was successfully staged\n", file_addresses[i]);
             closedir(working_tree_folder);
             continue;
         }
 
         closedir(working_tree_folder);
+
+        char last_commit_folder_address[MAX_PATH_LENGTH];
+        sprintf(last_commit_folder_address, ".kambiz/branches/%s/%d/%s", current_branch_name, find_branch_head_n_id(current_branch_name, 1), folder_address);
+        DIR *last_commit_folder = opendir(last_commit_folder_address);
+        if ((search_in_directory(last_commit_folder, file_name, DT_DIR) != NULL) ||
+            (search_in_directory(last_commit_folder, file_name, DT_REG) != NULL))
+        {
+            bool is_staged = false;
+            FILE *deleting_stage = fopen(".kambiz/deleting_stage.txt", "r+");
+            char deleting_file_address[MAX_PATH_LENGTH];
+            while (fscanf(deleting_stage, "%[^\n]s", deleting_file_address) != EOF)
+            {
+                if (strcmp(deleting_file_address, file_addresses[i]) == 0)
+                {
+                    fprintf(stderr, "\"%s\" is already staged to be removed\n", file_addresses[i]);
+                    fclose(deleting_stage);
+                    is_staged = true;
+                    break;
+                }
+            }
+
+            if (!is_staged)
+            {
+                fseek(deleting_stage, 0, SEEK_END);
+                fprintf(deleting_stage, "%s\n", file_addresses[i]);
+                fclose(deleting_stage);
+                closedir(last_commit_folder);
+                fprintf(stdout, "\"%s\" was successfully staged to be removed\n", file_addresses[i]);
+            }
+
+            continue;
+        }
+
+        closedir(last_commit_folder);
         fprintf(stderr, "\"%s\" not found\n", file_addresses[i]);
     }
     return 1;
@@ -506,7 +606,7 @@ int add_redo()
             if (!is_similar(entry->d_name, staged_file_address, entry->d_type))
             {
                 char command[MAX_FULL_COMMAND_LENGTH] = "";
-                sprintf(command, "rsync -r \"%s\" \".kambiz/stage/\"", entry->d_name);
+                sprintf(command, "cp -r \"%s\" \".kambiz/stage/\"", entry->d_name);
                 system(command);
                 fprintf(stdout, "\"%s\" ", entry->d_name);
                 redo_done = true;
@@ -694,6 +794,92 @@ int reset_undo()
     return 1;
 }
 
+int status()
+{
+    char last_commit_folder_address[MAX_PATH_LENGTH];
+    sprintf(last_commit_folder_address, ".kambiz/branches/%s/%d", current_branch_name, find_branch_head_n_id(current_branch_name, 1));
+    DIR *last_commit_folder = opendir(last_commit_folder_address);
+    DIR *working_tree = opendir(".");
+    DIR *stage = opendir(".kambiz/stage");
+    struct dirent *working_tree_entry;
+    while ((working_tree_entry = readdir(working_tree)) != NULL)
+    {
+        if (working_tree_entry->d_name[0] == '.')
+        {
+            continue;
+        }
+
+        char status = ' ';
+        char stage_status;
+
+        if (search_in_directory(last_commit_folder, working_tree_entry->d_name, working_tree_entry->d_type) == NULL)
+        {
+            status = 'A';
+            stage_status = '-';
+            if (search_in_directory(stage, working_tree_entry->d_name, working_tree_entry->d_type) != NULL)
+            {
+                char staged_file_address[MAX_PATH_LENGTH];
+                sprintf(staged_file_address, "%s/%s", ".kambiz/stage", working_tree_entry->d_name);
+                if (is_similar(working_tree_entry->d_name, staged_file_address, working_tree_entry->d_type))
+                {
+                    stage_status = '+';
+                }
+            }
+        }
+        else
+        {
+            char last_commit_file_address[MAX_PATH_LENGTH];
+            sprintf(last_commit_file_address, "%s/%s", last_commit_folder_address, working_tree_entry->d_name);
+            if (!is_similar(working_tree_entry->d_name, last_commit_file_address, working_tree_entry->d_type))
+            {
+                status = 'M';
+                stage_status = '-';
+
+                if (search_in_directory(stage, working_tree_entry->d_name, working_tree_entry->d_type) != NULL)
+                {
+                    char staged_file_address[MAX_PATH_LENGTH];
+                    sprintf(staged_file_address, "%s/%s", ".kambiz/stage", working_tree_entry->d_name);
+                    if (is_similar(working_tree_entry->d_name, staged_file_address, working_tree_entry->d_type))
+                    {
+                        stage_status = '+';
+                    }
+                }
+            }
+        }
+
+        if (status != ' ')
+        {
+            fprintf(stdout, "%s: %c%c\n", working_tree_entry->d_name, stage_status, status);
+        }
+    }
+
+    struct dirent *last_commit_entry;
+    while ((last_commit_entry = readdir(last_commit_folder)) != NULL)
+    {
+        if (last_commit_entry->d_name[0] == '.')
+        {
+            continue;
+        }
+
+        if (search_in_directory(working_tree, last_commit_entry->d_name, last_commit_entry->d_type) == NULL)
+        {
+            char stage_status = '-';
+            FILE *deleting_stage = fopen(".kambiz/deleting_stage.txt", "r");
+            char deleting_file_address[MAX_PATH_LENGTH];
+            while (fscanf(deleting_stage, "%[^\n]s", deleting_file_address) != EOF)
+            {
+                if (strcmp(deleting_file_address, last_commit_entry->d_name) == 0)
+                {
+                    stage_status = '+';
+                }
+                fscanf(deleting_stage, "\n");
+            }
+            fprintf(stdout, "%s: %cD\n", last_commit_entry->d_name, stage_status);
+        }
+    }
+    return 1;
+}
+
 int commit(char message[])
 {
     if (strlen(message) > 72)
@@ -707,6 +893,7 @@ int commit(char message[])
     int commited_files_count = 0;
     DIR *stage_folder = opendir(".kambiz/stage");
     struct dirent *entry;
+    char new_commit_address[MAX_PATH_LENGTH];
     while ((entry = readdir(stage_folder)) != NULL)
     {
         if (((entry->d_type != DT_DIR) && (entry->d_type != DT_REG)) ||
@@ -717,15 +904,14 @@ int commit(char message[])
 
         if (commited_files_count == 0)
         {
-            char new_commit_address[MAX_PATH_LENGTH];
             sprintf(new_commit_address, ".kambiz/branches/%s/%d", current_branch_name, commit_id);
             mkdir(new_commit_address, 0777);
 
             char command[MAX_FULL_COMMAND_LENGTH] = "";
-            sprintf(command, "rsync -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/%d", current_branch_name, current_branch_head_id, current_branch_name, commit_id);
+            sprintf(command, "cp -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/%d", current_branch_name, current_branch_head_id, current_branch_name, commit_id);
             system(command);
 
-            sprintf(command, "rsync -r .kambiz/stage/%s .kambiz/branches/%s/%d", entry->d_name, current_branch_name, commit_id);
+            sprintf(command, "cp -r .kambiz/stage/%s .kambiz/branches/%s/%d", entry->d_name, current_branch_name, commit_id);
             system(command);
 
             sprintf(command, "rm -r .kambiz/stage/*");
@@ -734,6 +920,31 @@ int commit(char message[])
 
         commited_files_count++;
     }
+
+    FILE *deleting_stage = fopen(".kambiz/deleting_stage.txt", "r");
+    char deleting_file_address[MAX_PATH_LENGTH];
+    while (fscanf(deleting_stage, "%[^\n]s", deleting_file_address) != EOF)
+    {
+        if (commited_files_count == 0)
+        {
+            sprintf(new_commit_address, ".kambiz/branches/%s/%d", current_branch_name, commit_id);
+            mkdir(new_commit_address, 0777);
+
+            char command[MAX_FULL_COMMAND_LENGTH] = "";
+            sprintf(command, "cp -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/%d", current_branch_name, current_branch_head_id, current_branch_name, commit_id);
+            system(command);
+        }
+
+        char command[MAX_FULL_COMMAND_LENGTH] = "";
+        sprintf(command, "rm -r \"%s/%s\"", new_commit_address, deleting_file_address);
+        system(command);
+
+        commited_files_count++;
+        fscanf(deleting_stage, "\n");
+    }
+
+    deleting_stage = fopen(".kambiz/deleting_stage.txt", "w");
+    fclose(deleting_stage);
 
     if (commited_files_count == 0)
     {
@@ -783,14 +994,31 @@ int branch(char new_branch_name[])
     int current_branch_head_id = find_branch_head_n_id(current_branch_name, 1);
 
     char command[MAX_FULL_COMMAND_LENGTH] = "";
-    sprintf(command, "rsync -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/0", current_branch_name, current_branch_head_id, new_branch_name);
+    sprintf(command, "cp -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/0", current_branch_name, current_branch_head_id, new_branch_name);
     system(command);
+
+    fprintf(stdout, "Branch %s was successfully created", new_branch_name);
 
     return 1;
 }
 
 int checkout_branch(char branch_name[])
 {
+    if (!able_to_checkout())
+    {
+        return -1;
+    }
+
+    char command[MAX_FULL_COMMAND_LENGTH] = "";
+    sprintf(command, "cp -r .kambiz/branches/%s/ .", branch_name);
+    system(command);
+
+    FILE *current_branch_file = fopen(".kambiz/branches/current_branch.txt", "w");
+    fprintf(current_branch_file, "%s", branch_name);
+    fclose(current_branch_file);
+
+    fprintf(stdout, "Checkout to %s was successfully done", branch_name);
+
     return 1;
 }
 
@@ -845,46 +1073,39 @@ int log_filter(char option[], char **arguments, int arguments_count)
         }
         if (filter_author)
         {
-
-            sscanf(line + 200, "%100s", author);
             if (strcmp(author, arguments[0]) != 0)
             {
-                scanf("\n");
+                fscanf(commit_log_file, "\n");
                 continue;
             }
         }
         if (filter_branch)
         {
-
-            sscanf(line + 100, "%100s", branch);
             if (strcmp(branch, arguments[0]) != 0)
             {
-                scanf("\n");
+                fscanf(commit_log_file, "\n");
                 continue;
             }
         }
         if (filter_since)
         {
-            sscanf(line + 300, "%100s", time);
             if (string_to_time(time) < wanted_time)
             {
-                scanf("\n");
+                fscanf(commit_log_file, "\n");
                 continue;
             }
         }
         if (filter_before)
         {
-            sscanf(line + 300, "%100s", time);
             if (string_to_time(time) > wanted_time)
             {
-                scanf("\n");
+                fscanf(commit_log_file, "\n");
                 continue;
             }
         }
         if (filter_word)
         {
             bool found_word = false;
-            sscanf(line + 500, "%100s", message);
             for (int i = 0; i < arguments_count; i++)
             {
                 if (strstr(message, arguments[i]) != NULL)
@@ -895,13 +1116,13 @@ int log_filter(char option[], char **arguments, int arguments_count)
             }
             if (!found_word)
             {
-                scanf("\n");
+                fscanf(commit_log_file, "\n");
                 continue;
             }
         }
         printf("Commit-ID: %s | Branch: %s | Author: %s | Time: %s | Files_count: %s | Message: \"%s\"\n",
                id, branch, author, time, commited_files_count, message);
-        scanf("\n");
+        fscanf(commit_log_file, "\n");
     }
     return 1;
 }
@@ -1049,6 +1270,12 @@ int main(int argc, char **argv)
         }
     }
 
+    if ((strcmp(argv[1], "status") == 0) && (argc == 2))
+    {
+        status();
+        return 0;
+    }
+
     if (strcmp(argv[1], "commit") == 0)
     {
         if (argc == 3)
@@ -1095,7 +1322,7 @@ int main(int argc, char **argv)
         if (search_in_directory(branches, argv[2], DT_DIR) != NULL)
         {
             closedir(branches);
-            // checkout_branch(argv[2]);
+            checkout_branch(argv[2]);
             return 0;
         }
 
@@ -1107,17 +1334,19 @@ int main(int argc, char **argv)
     {
         if (argc == 2)
         {
-            log_filter("", argv + 2, 0);
+            log_filter("", argv + 3, 0);
             return 0;
         }
-        if (argc == 3)
+
+        if (argc == 4)
         {
-            log_filter(argv[2], argv + 2, 1);
+            log_filter(argv[2], argv + 3, 1);
             return 0;
         }
-        if (strcmp(argv[1], "log") == 0)
+
+        if (strcmp(argv[1], "-search") == 0)
         {
-            log_filter(argv[2], argv + 2, argc - 3);
+            log_filter(argv[2], argv + 3, argc - 3);
             return 0;
         }
     }
