@@ -314,6 +314,7 @@ bool able_to_checkout()
     closedir(stage);
 
     return true;
+    
 }
 
 int init()
