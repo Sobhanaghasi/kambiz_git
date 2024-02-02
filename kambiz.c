@@ -790,7 +790,7 @@ int checkout_branch(char branch_name[])
     //
 }
 
-int log(char option[], char argument[])
+int log(char option[], char** arguments)
 {
     FILE *commit_log_file = fopen(".kambiz/branches/commit_log.txt", "w");
     char line[601];
@@ -806,12 +806,12 @@ int log(char option[], char argument[])
     if(filter_n){
         log_counter = 0;
         n;
-        sscanf(argument, "%d", &n);
+        sscanf(arguments[0], "%d", &n);
     }
 
     time_t wanted_time;
     if (filter_since || filter_before){
-        wanted_time = string_to_time(argument);
+        wanted_time = string_to_time(arguments[0]);
         if (wanted_time = -1){
             fprintf(stderr, "Time should be in YYYY/mm/dd HH:MM:SS format");
             return -1;
@@ -827,15 +827,15 @@ int log(char option[], char argument[])
         }
         if (filter_author){
             char author[101];
-            sscanf(line + 100, "%100s", author);
-            if (strcmp(author, argument) != 0){
+            sscanf(line + 200, "%100s", author);
+            if (strcmp(author, arguments[0]) != 0){
                 break;
             }
         }
         if (filter_branch){
             char branch[101];
-            sscanf(line + 200, "%100s", branch);
-            if (strcmp(branch, argument) != 0){
+            sscanf(line + 100, "%100s", branch);
+            if (strcmp(branch, arguments[0]) != 0){
                 break;
             }
         }
