@@ -262,11 +262,41 @@ bool is_similar(char address1[], char address2[], int type)
 
 bool able_to_checkout()
 {
-    bool changes_commited = true;
     char last_commit_folder_address[MAX_PATH_LENGTH];
     sprintf(last_commit_folder_address, ".kambiz/branches/%s/%d", current_branch_name, find_branch_head_n_id(current_branch_name, 1));
     DIR *last_commit_folder = opendir(last_commit_folder_address);
     DIR *working_tree = opendir(".");
+    DIR *stage = opendir(".kambiz/stage");
+    struct dirent *working_tree_entry;
+    while ((working_tree_entry = readdir(working_tree)) != NULL)
+    {
+        if (((working_tree_entry->d_type != DT_DIR) && (working_tree_entry->d_type != DT_REG)) ||
+            (working_tree_entry->d_name[0] == '.'))
+        {
+            continue;
+        }
+
+        if (search_in_directory(last_commit_folder, working_tree_entry->d_name, working_tree_entry->d_type) == NULL)
+        {
+            closedir(last_commit_folder);
+            closedir(working_tree);
+            closedir(stage);
+            return false;
+        }
+        else
+        {
+            char last_commit_file_address[MAX_PATH_LENGTH];
+            sprintf(last_commit_file_address, "%s/%s", last_commit_folder_address, working_tree_entry->d_name);
+            if (!is_similar(working_tree_entry->d_name, last_commit_file_address, working_tree_entry->d_type))
+            {
+                closedir(last_commit_folder);
+                closedir(working_tree);
+                closedir(stage);
+                return false;
+            }
+        }
+    }
+
     struct dirent *last_commit_entry;
     while ((last_commit_entry = readdir(last_commit_folder)) != NULL)
     {
@@ -276,45 +306,17 @@ bool able_to_checkout()
             continue;
         }
 
-        if (search_in_directory(working_tree, last_commit_entry->d_name, last_commit_entry->d_type) != NULL)
+        if (search_in_directory(working_tree, last_commit_entry->d_name, last_commit_entry->d_type) == NULL)
         {
-            char last_commit_file_address[MAX_PATH_LENGTH];
-            sprintf(last_commit_file_address, "%s/%s", last_commit_folder_address, last_commit_entry->d_name);
-            if (!is_similar(last_commit_file_address, last_commit_entry->d_name, last_commit_entry->d_type))
-            {
-                fprintf(stderr, "Can't checkout: Changes or deletions not commited\n");
-                closedir(last_commit_folder);
-                closedir(working_tree);
-                return false;
-            }
-        }
-        else
-        {
-            fprintf(stderr, "Can't checkout: Changes or deletions not commited\n");
             closedir(last_commit_folder);
             closedir(working_tree);
+            closedir(stage);
             return false;
         }
     }
-
-    DIR *stage = opendir(".kambiz/stage");
-    struct dirent *staged_entry;
-    while ((staged_entry = readdir(stage)) != NULL)
-    {
-        if (((staged_entry->d_type != DT_DIR) && (staged_entry->d_type != DT_REG)) ||
-            (staged_entry->d_name[0] == '.'))
-        {
-            continue;
-        }
-
-        fprintf(stderr, "Can't checkout: Staging area not empty\n");
-        closedir(stage);
-        return false;
-    }
     closedir(stage);
 
-    return true;
-    
+    return 1;
 }
 
 int init()
@@ -805,7 +807,8 @@ int status()
     struct dirent *working_tree_entry;
     while ((working_tree_entry = readdir(working_tree)) != NULL)
     {
-        if (working_tree_entry->d_name[0] == '.')
+        if (((working_tree_entry->d_type != DT_DIR) && (working_tree_entry->d_type != DT_REG)) ||
+            (working_tree_entry->d_name[0] == '.'))
         {
             continue;
         }
@@ -857,7 +860,8 @@ int status()
     struct dirent *last_commit_entry;
     while ((last_commit_entry = readdir(last_commit_folder)) != NULL)
     {
-        if (last_commit_entry->d_name[0] == '.')
+        if (((last_commit_entry->d_type != DT_DIR) && (last_commit_entry->d_type != DT_REG)) ||
+            (last_commit_entry->d_name[0] == '.'))
         {
             continue;
         }
@@ -1008,6 +1012,21 @@ int checkout_branch(char branch_name[])
     if (!able_to_checkout())
     {
         return -1;
+    }
+
+    DIR *working_tree = opendir(".");
+    struct dirent *entry;
+    while ((entry = readdir(working_tree)) != NULL)
+    {
+        if (((entry->d_type != DT_DIR) && (entry->d_type != DT_REG)) ||
+            (entry->d_name[0] == '.'))
+        {
+            continue;
+        }
+
+        char command[MAX_FULL_COMMAND_LENGTH] = "";
+        sprintf(command, "rm -r \"%s\"", entry->d_name);
+        system(command);
     }
 
     char command[MAX_FULL_COMMAND_LENGTH] = "";
