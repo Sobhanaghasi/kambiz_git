@@ -23,7 +23,9 @@ char local_address[MAX_PATH_LENGTH];
 char user_name[MAX_STRING_LENGTH] = "default";
 char user_email[MAX_STRING_LENGTH] = "default";
 bool init_done = false;
+bool on_head = false;
 char current_branch_name[MAX_STRING_LENGTH] = "";
+int current_id = 0;
 int last_commit_id;
 
 time_t string_to_time(char time_string[])
@@ -128,10 +130,16 @@ void update_user_data()
 
 void update_branch_name()
 {
-    char current_branch[MAX_PATH_LENGTH] = ".kambiz/branches/current_branch.txt";
-    FILE *current_branch_file = fopen(current_branch, "r");
-    fscanf(current_branch_file, "%[^\n]s", current_branch_name);
+    FILE *current_branch_file = fopen(".kambiz/branches/current_branch.txt", "r");
+    fscanf(current_branch_file, "%s", current_branch_name);
     fclose(current_branch_file);
+}
+
+void update_id()
+{
+    FILE *current_id_file = fopen(".kambiz/branches/current_id.txt", "r");
+    fscanf(current_id_file, "%d", &current_id);
+    fclose(current_id_file);
 }
 
 void update_last_commit_id()
@@ -149,7 +157,6 @@ int find_branch_head_n_id(char branch_name[], int n)
     char line[601];
     while (fscanf(commit_log, "%[^\n]s", line) != EOF)
     {
-        // printf("%s\n", line);
         char log_branch_name[101];
         sscanf(line + 100, "%100s", log_branch_name);
         if (strcmp(log_branch_name, branch_name) == 0)
@@ -372,6 +379,11 @@ int init()
     FILE *current_branch_file = fopen(current_branch_address, "w");
     fprintf(current_branch_file, "master");
     fclose(current_branch_file);
+
+    char current_id_address[MAX_PATH_LENGTH] = ".kambiz/branches/current_id.txt";
+    FILE *current_id_file = fopen(current_id_address, "w");
+    fprintf(current_id_file, "0");
+    fclose(current_id_file);
 
     char commit_log_address[MAX_PATH_LENGTH] = ".kambiz/branches/commit_log.txt";
     FILE *commit_log_file = fopen(commit_log_address, "w");
@@ -644,7 +656,7 @@ bool add_n(char address[], int current_depth, int max_depth, char output[])
 
         if ((current_depth == max_depth) || (entry->d_type == DT_REG))
         {
-            bool is_staged = 0;
+            bool is_staged = false;
 
             char file_address[MAX_PATH_LENGTH];
             sprintf(file_address, "%s/%s", address, entry->d_name);
@@ -656,11 +668,14 @@ bool add_n(char address[], int current_depth, int max_depth, char output[])
             sprintf(staged_folder_address, ".kambiz/stage/%s", address);
             DIR *staged_folder = opendir(staged_folder_address);
 
-            if (search_in_directory(staged_folder, entry->d_name, entry->d_type) != NULL)
+            if (staged_folder != NULL)
             {
-                if (is_similar(file_address, staged_file_address, entry->d_type))
+                if (search_in_directory(staged_folder, entry->d_name, entry->d_type) != NULL)
                 {
-                    is_staged = true;
+                    if (is_similar(file_address, staged_file_address, entry->d_type))
+                    {
+                        is_staged = true;
+                    }
                 }
             }
 
@@ -698,7 +713,7 @@ bool add_n(char address[], int current_depth, int max_depth, char output[])
 
         if (entry->d_type == DT_DIR)
         {
-            char new_address[MAX_PATH_LENGTH];
+            char new_address[MAX_PATH_LENGTH] = "";
             sprintf(new_address, "%s/%s", address, entry->d_name);
             bool is_staged = add_n(new_address, current_depth + 1, max_depth, output);
 
@@ -887,6 +902,12 @@ int status()
 
 int commit(char message[])
 {
+    if (!on_head)
+    {
+        fprintf(stderr, "Commits can only be done from branch's head");
+        return -1;
+    }
+
     if (strlen(message) > 72)
     {
         fprintf(stderr, "Message's charachters can't exceed 72");
@@ -916,7 +937,7 @@ int commit(char message[])
             sprintf(command, "cp -r .kambiz/branches/%s/%d/ .kambiz/branches/%s/%d", current_branch_name, current_branch_head_id, current_branch_name, commit_id);
             system(command);
 
-            sprintf(command, "cp -r .kambiz/stage/%s .kambiz/branches/%s/%d", entry->d_name, current_branch_name, commit_id);
+            sprintf(command, "cp -r .kambiz/stage/ .kambiz/branches/%s/%d", current_branch_name, commit_id);
             system(command);
 
             sprintf(command, "rm -r .kambiz/stage/*");
@@ -963,7 +984,7 @@ int commit(char message[])
 
     fprintf(stdout, "%d staged files successfully commited at %s (Commit-ID: %d)", commited_files_count, current_time_string, commit_id);
     char commit_log_line[10000] = "";
-    sprintf(commit_log_line, "%-100d%-100s%-100s%-100s%-100d%-100s\n", commit_id, current_branch_name, user_name, current_time_string, commited_files_count, message);
+    sprintf(commit_log_line, "%-100d%-100s%-100s%-100s%-100d%s\n", commit_id, current_branch_name, user_name, current_time_string, commited_files_count, message);
 
     FILE *commit_log_file = fopen(".kambiz/branches/commit_log.txt", "r");
     char commit_log_content[10000];
@@ -982,6 +1003,10 @@ int commit(char message[])
     FILE *last_commit_id_file = fopen(".kambiz/branches/last_commit_id.txt", "w");
     fprintf(last_commit_id_file, "%d", commit_id);
     fclose(last_commit_id_file);
+
+    FILE *current_id_file = fopen(".kambiz/branches/current_id.txt", "w");
+    fprintf(current_id_file, "%d", commit_id);
+    fclose(current_id_file);
 
     return 1;
 }
@@ -1009,8 +1034,9 @@ int branch(char new_branch_name[])
 
 int checkout_branch(char branch_name[])
 {
-    if (!able_to_checkout())
+    if ((!able_to_checkout()) && (on_head))
     {
+        fprintf(stderr, "Can't checkout: Not all changes, deletions or additions are commited");
         return -1;
     }
 
@@ -1030,15 +1056,69 @@ int checkout_branch(char branch_name[])
     }
 
     char command[MAX_FULL_COMMAND_LENGTH] = "";
-    sprintf(command, "cp -r .kambiz/branches/%s/ .", branch_name);
+    sprintf(command, "cp -r .kambiz/branches/%s/%d/ .", branch_name, find_branch_head_n_id(branch_name, 1));
     system(command);
 
     FILE *current_branch_file = fopen(".kambiz/branches/current_branch.txt", "w");
     fprintf(current_branch_file, "%s", branch_name);
     fclose(current_branch_file);
 
-    fprintf(stdout, "Checkout to %s was successfully done", branch_name);
+    FILE *current_id_file = fopen(".kambiz/branches/current_id.txt", "w");
+    fprintf(current_id_file, "%d", find_branch_head_n_id(branch_name, 1));
+    fclose(current_id_file);
 
+    sprintf(command, "rm -r .kambiz/stage/*");
+    system(command);
+
+    fprintf(stdout, "Checkout to %s was successfully done", branch_name);
+    return 1;
+}
+
+int checkout_commit(char branch_name[], int id)
+{
+    if ((!able_to_checkout()) && (on_head))
+    {
+        fprintf(stderr, "Can't checkout: Not all changes, deletions or additions are commited");
+        return -1;
+    }
+
+    DIR *working_tree = opendir(".");
+    struct dirent *entry;
+    while ((entry = readdir(working_tree)) != NULL)
+    {
+        if (((entry->d_type != DT_DIR) && (entry->d_type != DT_REG)) ||
+            (entry->d_name[0] == '.'))
+        {
+            continue;
+        }
+
+        char command[MAX_FULL_COMMAND_LENGTH] = "";
+        sprintf(command, "rm -r \"%s\"", entry->d_name);
+        system(command);
+    }
+
+    char command[MAX_FULL_COMMAND_LENGTH] = "";
+    sprintf(command, "cp -r .kambiz/branches/%s/%d/ .", branch_name, id);
+    system(command);
+
+    sprintf(command, "rm -r .kambiz/stage/*");
+    system(command);
+
+    FILE *current_branch_file = fopen(".kambiz/branches/current_branch.txt", "w");
+    fprintf(current_branch_file, "%s", branch_name);
+    fclose(current_branch_file);
+
+    FILE *current_id_file = fopen(".kambiz/branches/current_id.txt", "w");
+    fprintf(current_id_file, "%d", id);
+    fclose(current_id_file);
+
+    fprintf(stdout, "Checkout to commit-id: %d on %s branch was successfully done", id, branch_name);
+    return 1;
+}
+
+int revert(char branch_name[], int id, char message[]){
+    checkout_commit(branch_name, id);
+    commit(message);
     return 1;
 }
 
@@ -1081,7 +1161,12 @@ int log_filter(char option[], char **arguments, int arguments_count)
         char time[101];
         char message[101];
         char commited_files_count[101];
-        sscanf(line, "%100s%100s%100s%100s%100s%100s", id, branch, author, time, commited_files_count, message);
+        sscanf(line, "%100s", id);
+        sscanf(line + 100, "%100s", branch);
+        sscanf(line + 200, "%100s", author);
+        sscanf(line + 300, "%100s", time);
+        sscanf(line + 400, "%100s", commited_files_count);
+        sscanf(line + 500, "%[^\n]s", message);
 
         if (filter_n)
         {
@@ -1176,13 +1261,17 @@ int main(int argc, char **argv)
     {
         // Get Branch Name
         update_branch_name();
+        update_id();
 
         // Get Last ID
         update_last_commit_id();
+
+        // Check being on head
+        on_head = (find_branch_head_n_id(current_branch_name, 1) == current_id);
     }
 
     // Check Aliases
-    char alias_value[MAX_FULL_COMMAND_LENGTH] = "";
+    /*char alias_value[MAX_FULL_COMMAND_LENGTH] = "";
     FILE *global_aliases = fopen(global_aliases_address, "r");
     get_value_by_attribute(global_aliases, argv[1], alias_value, 1, 1, true);
     fclose(global_aliases);
@@ -1211,7 +1300,7 @@ int main(int argc, char **argv)
             argv[i] = (char *)malloc(strlen(alias_value_words[i]) + 1);
             strcpy(argv[i], alias_value_words[i]);
         }
-    }
+    }*/
 
     if ((strcmp(argv[1], "config") == 0))
     {
@@ -1332,9 +1421,12 @@ int main(int argc, char **argv)
 
         if (strcmp(before_dash, "HEAD") == 0)
         {
-            int n;
-            sscanf(after_dash, "%d", &n);
-            // checkout_head(n);
+            int n = 0;
+            if (strcmp(after_dash, "") != 0)
+            {
+                sscanf(after_dash, "%d", &n);
+            }
+            checkout_commit(current_branch_name, find_branch_head_n_id(current_branch_name, n + 1));
             return 0;
         }
 
@@ -1346,7 +1438,15 @@ int main(int argc, char **argv)
             return 0;
         }
 
-        // checkout_commit(argv[2]);
+        char commit_branch[MAX_STRING_LENGTH] = "";
+        FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+        get_value_by_attribute(log_file, argv[2], commit_branch, 5, 1, false);
+        if (strcmp(commit_branch, "") != 0)
+        {
+            int id;
+            sscanf(argv[2], "%d", &id);
+            checkout_commit(commit_branch, id);
+        }
         return 0;
     }
 
@@ -1371,6 +1471,65 @@ int main(int argc, char **argv)
         }
     }
 
+    if ((strcmp(argv[1], "revert") == 0) && (argc >= 3))
+    {
+        char commit_branch[MAX_STRING_LENGTH] = "";
+        int id = 0;
+        char last_message[MAX_STRING_LENGTH] = "";
+        FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+        get_value_by_attribute(log_file, argv[argc - 1], commit_branch, 5, 1, false);
+        get_value_by_attribute(log_file, argv[argc - 1], last_message, 5, 5, true);
+        if (strcmp(commit_branch, "") != 0)
+        {
+            sscanf(argv[argc - 1], "%d", &id);
+        }
+
+        char before_dash[MAX_SHORT_COMMAND_LENGTH] = "";
+        char after_dash[MAX_SHORT_COMMAND_LENGTH] = "";
+        split_by_chars(argv[argc - 1], before_dash, after_dash, "-");
+
+        if (strcmp(before_dash, "HEAD") == 0)
+        {
+            int n = 0;
+            if (strcmp(after_dash, "") != 0)
+            {
+                sscanf(after_dash, "%d", &n);
+            }
+
+            if (argc == 3)
+            {
+                revert(current_branch_name, find_branch_head_n_id(current_branch_name, n), last_message);
+                return 0;
+            }
+
+            else if ((argc == 5) && (strcmp(argv[2], "-m") == 0))
+            {
+                revert(current_branch_name, find_branch_head_n_id(current_branch_name, n), argv[3]);
+                return 0;
+            }
+        }
+
+        if (id != 0)
+        {
+            if ((strcmp(argv[2], "-n") == 0) && (argc == 4))
+            {
+                checkout_commit(commit_branch, id);
+                return 0;
+            }
+
+            else if (argc == 3)
+            {
+                revert(commit_branch, id, last_message);
+                return 0;
+            }
+
+            else if ((argc == 5) && (strcmp(argv[2], "-m") == 0))
+            {
+                revert(commit_branch, id, argv[3]);
+                return 0;
+            }
+        }
+    }
     fprintf(stderr, "Invalid Command");
     return 0;
 }
