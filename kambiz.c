@@ -1040,6 +1040,27 @@ int branch(char new_branch_name[])
     return 1;
 }
 
+int show_branches()
+{
+    DIR *branches_folder = opendir(".kambiz/branches");
+    struct dirent *entry;
+    while ((entry = readdir(branches_folder)) != NULL)
+    {
+        if ((entry->d_name[0] == '.') || (entry->d_type != DT_DIR))
+        {
+            continue;
+        }
+        printf("%s", entry->d_name);
+        if (strcmp(entry->d_name, current_branch_name) == 0)
+        {
+            printf("(Current)");
+        }
+        printf("\n");
+    }
+
+    return 1;
+}
+
 int checkout_commit(char branch_name[], int id)
 {
     if ((!able_to_checkout()) && (on_head))
@@ -1414,7 +1435,7 @@ int main(int argc, char **argv)
     {
         if (argc == 2)
         {
-            // show_branches();
+            show_branches();
             return 0;
         }
         if (argc == 3)
@@ -1551,8 +1572,8 @@ int main(int argc, char **argv)
 
     if ((strcmp(argv[1], "tag") == 0) && (argc >= 4))
     {
-        if (strcmp(argv[3], "-m") == 0){
-            
+        if (strcmp(argv[3], "-m") == 0)
+        {
         }
     }
     fprintf(stderr, "Invalid Command");
