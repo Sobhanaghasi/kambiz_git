@@ -366,6 +366,10 @@ int init()
     FILE *aliases_file = fopen(aliases_address, "w");
     fclose(aliases_file);
 
+    char tags_address[MAX_PATH_LENGTH] = ".kambiz/tags.txt";
+    FILE *tags_file = fopen(tags_address, "w");
+    fclose(tags_file);
+
     char add_log_address[MAX_PATH_LENGTH] = ".kambiz/add_log.txt";
     FILE *add_log_file = fopen(add_log_address, "w");
     fclose(add_log_file);
@@ -1480,17 +1484,6 @@ int main(int argc, char **argv)
 
     if ((strcmp(argv[1], "revert") == 0) && (argc >= 3))
     {
-        char commit_branch[MAX_STRING_LENGTH] = "";
-        int id = 0;
-        char last_message[MAX_STRING_LENGTH] = "";
-        FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
-        get_value_by_attribute(log_file, argv[argc - 1], commit_branch, 5, 1, false);
-        get_value_by_attribute(log_file, argv[argc - 1], last_message, 5, 5, true);
-        if (strcmp(commit_branch, "") != 0)
-        {
-            sscanf(argv[argc - 1], "%d", &id);
-        }
-
         char before_dash[MAX_SHORT_COMMAND_LENGTH] = "";
         char after_dash[MAX_SHORT_COMMAND_LENGTH] = "";
         split_by_chars(argv[argc - 1], before_dash, after_dash, "-");
@@ -1505,6 +1498,12 @@ int main(int argc, char **argv)
 
             if (argc == 3)
             {
+                char last_message[MAX_STRING_LENGTH] = "";
+                FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+                char id_string[MAX_STRING_LENGTH] = "";
+                sprintf(id_string, "%d", find_branch_head_n_id(current_branch_name, n));
+                get_value_by_attribute(log_file, id_string, last_message, 5, 5, true);
+                fclose(log_file);
                 revert(current_branch_name, find_branch_head_n_id(current_branch_name, n), last_message);
                 return 0;
             }
@@ -1514,6 +1513,18 @@ int main(int argc, char **argv)
                 revert(current_branch_name, find_branch_head_n_id(current_branch_name, n), argv[3]);
                 return 0;
             }
+        }
+
+        char commit_branch[MAX_STRING_LENGTH] = "";
+        int id = 0;
+        char last_message[MAX_STRING_LENGTH] = "";
+        FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+        get_value_by_attribute(log_file, argv[argc - 1], commit_branch, 5, 1, false);
+        get_value_by_attribute(log_file, argv[argc - 1], last_message, 5, 5, true);
+        fclose(log_file);
+        if (strcmp(commit_branch, "") != 0)
+        {
+            sscanf(argv[argc - 1], "%d", &id);
         }
 
         if (id != 0)
@@ -1535,6 +1546,13 @@ int main(int argc, char **argv)
                 revert(commit_branch, id, argv[3]);
                 return 0;
             }
+        }
+    }
+
+    if ((strcmp(argv[1], "tag") == 0) && (argc >= 4))
+    {
+        if (strcmp(argv[3], "-m") == 0){
+            
         }
     }
     fprintf(stderr, "Invalid Command");
