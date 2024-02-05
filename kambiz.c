@@ -17,6 +17,12 @@
 #define MAX_FULL_COMMAND_LENGTH 1000
 #define MAX_WORD_COUNT 50
 #define MAX_SHORT_COMMAND_LENGTH 50
+#define MAX_INT_VALUE 1000000
+#define MAX_FILE_SIZE 1000000
+
+#define COLOR_RESET "\e[0m"
+#define CYAN "\e[0;36m"
+#define YELLLOW "\e[0;33m"
 
 char global_address[MAX_PATH_LENGTH] = "/Users/sobhan/Documents/Kambiz";
 char local_address[MAX_PATH_LENGTH];
@@ -83,7 +89,7 @@ void get_value_by_attribute(FILE *file, char attribute[], char destination[], in
     rewind(file);
 }
 
-void change_value_by_attribute(FILE *file, char attribute[], char value[], int value_count, int wanted_value)
+void change_value_by_attribute(FILE *file, char attribute[], char value[], int value_count, int wanted_value, bool have_spaces)
 {
     char line[MAX_STRING_LENGTH];
     long line_position = -1;
@@ -93,7 +99,7 @@ void change_value_by_attribute(FILE *file, char attribute[], char value[], int v
         sscanf(line, "%100s", line_attribute);
         if (strcmp(line_attribute, attribute) == 0)
         {
-            line_position = ftell(file) - (100 * value_count) - 100;
+            line_position = ftell(file) - strlen(line);
             break;
         }
         fscanf(file, "\n");
@@ -104,7 +110,14 @@ void change_value_by_attribute(FILE *file, char attribute[], char value[], int v
     }
 
     fseek(file, line_position + (wanted_value * 100), SEEK_SET);
-    fprintf(file, "%-100s", value);
+    if (have_spaces)
+    {
+        fprintf(file, "%s\n", value);
+    }
+    else
+    {
+        fprintf(file, "%-100s", value);
+    }
 }
 
 void update_user_data()
@@ -380,6 +393,8 @@ int init()
 
     mkdir(".kambiz/stage", 0777);
     mkdir(".kambiz/branches", 0777);
+    mkdir(".kambiz/tags", 0777);
+    mkdir(".kambiz/shortcuts", 0777);
     mkdir(".kambiz/branches/master", 0777);
     mkdir(".kambiz/branches/master/0", 0777);
 
@@ -439,7 +454,7 @@ int config(char attribute[], char value[], bool is_global)
             get_value_by_attribute(config_file, attribute_value, previous_name_value, 1, 1, false);
             if (strcmp(previous_name_value, "") != 0)
             {
-                change_value_by_attribute(config_file, attribute_value, value, 1, 1);
+                change_value_by_attribute(config_file, attribute_value, value, 1, 1, false);
             }
             else
             {
@@ -458,7 +473,7 @@ int config(char attribute[], char value[], bool is_global)
             get_value_by_attribute(config_file, attribute_value, previous_email_value, 1, 1, false);
             if (strcmp(previous_email_value, "") != 0)
             {
-                change_value_by_attribute(config_file, attribute_value, value, 1, 1);
+                change_value_by_attribute(config_file, attribute_value, value, 1, 1, false);
             }
             else
             {
@@ -487,7 +502,7 @@ int config(char attribute[], char value[], bool is_global)
         get_value_by_attribute(config_file, attribute_value, previous_alias_value, 1, 1, true);
         if (strcmp(previous_alias_value, "") != 0)
         {
-            change_value_by_attribute(config_file, attribute_value, value, 1, 1);
+            change_value_by_attribute(config_file, attribute_value, value, 1, 1, false);
             fprintf(stdout, "Alias was sucsessfully overwrited: kambiz %s -> %s", attribute_value, value);
         }
         else
@@ -1019,6 +1034,57 @@ int commit(char message[])
     return 1;
 }
 
+int set_shortcut(char shortcut_name[], char shortcut_message[])
+{
+    char shortcut_file_address[MAX_PATH_LENGTH];
+    sprintf(shortcut_file_address, ".kambiz/shortcuts/%s.txt", shortcut_name);
+    FILE *shortcut_file = fopen(shortcut_file_address, "w");
+    fprintf(shortcut_file, "%s\n", shortcut_message);
+    fclose(shortcut_file);
+
+    fprintf(stdout, "Message shortcut was successfully created (%s -> %s)", shortcut_name, shortcut_message);
+    return 1;
+}
+
+int replace_shortcut(char shortcut_name[], char shortcut_message[])
+{
+    char shortcut_file_address[MAX_PATH_LENGTH];
+    sprintf(shortcut_file_address, ".kambiz/shortcuts/%s.txt", shortcut_name);
+    FILE *shortcut_file = fopen(shortcut_file_address, "r");
+    if (shortcut_file == NULL)
+    {
+        fprintf(stderr, "No shortcut exists with this name");
+        return -1;
+    }
+    fclose(shortcut_file);
+    shortcut_file = fopen(shortcut_file_address, "w");
+    fprintf(shortcut_file, "%s\n", shortcut_message);
+    fclose(shortcut_file);
+
+    fprintf(stdout, "Message shortcut was successfully overwrited (%s -> %s)", shortcut_name, shortcut_message);
+    return 1;
+}
+
+int remove_shortcut(char shortcut_name[])
+{
+    char shortcut_file_address[MAX_PATH_LENGTH];
+    sprintf(shortcut_file_address, ".kambiz/shortcuts/%s.txt", shortcut_name);
+    FILE *shortcut_file = fopen(shortcut_file_address, "r");
+    if (shortcut_file == NULL)
+    {
+        fprintf(stderr, "No shortcut exists with this name");
+        return -1;
+    }
+    fclose(shortcut_file);
+
+    char command[MAX_FULL_COMMAND_LENGTH] = "";
+    sprintf(command, "rm -r \"%s\"", shortcut_file_address);
+    system(command);
+
+    fprintf(stdout, "Message shortcut was successfully deleted (%s)", shortcut_name);
+    return 1;
+}
+
 int branch(char new_branch_name[])
 {
     char new_branch_address[MAX_PATH_LENGTH];
@@ -1264,6 +1330,221 @@ int log_filter(char option[], char **arguments, int arguments_count)
     return 1;
 }
 
+int file_diff(char address1[], char address2[], int begin1, int end1, int begin2, int end2)
+{
+    FILE *file1 = fopen(address1, "r");
+    char file1_content[MAX_FILE_SIZE] = "";
+    char temp_char;
+    while ((temp_char = fgetc(file1)) != EOF)
+    {
+        strncat(file1_content, &temp_char, 1);
+    }
+    fclose(file1);
+
+    FILE *file2 = fopen(address2, "r");
+    char file2_content[MAX_FILE_SIZE] = "";
+    while ((temp_char = fgetc(file2)) != EOF)
+    {
+        strncat(file2_content, &temp_char, 1);
+    }
+    fclose(file2);
+
+    char file1_lines[1000][MAX_STRING_LENGTH];
+    char line[MAX_STRING_LENGTH];
+    int file1_line_counter = 0;
+    int file1_position = 0;
+    file1_position += strspn(file1_content + file1_position, "\t\n ");
+
+    while (sscanf(file1_content + file1_position, "%[^\n]s", line) != -1)
+    {
+        file1_position += strcspn(file1_content + file1_position, "\n");
+        file1_position += strspn(file1_content + file1_position, "\t\n ");
+        strcpy(file1_lines[file1_line_counter++], line);
+    }
+
+    char file2_lines[1000][MAX_STRING_LENGTH];
+    int file2_line_counter = 0;
+    int file2_position = 0;
+    file2_position += strspn(file2_content + file2_position, "\t\n ");
+    while (sscanf(file2_content + file2_position, "%[^\n]s", line) != -1)
+    {
+        printf("%s", line);
+        file2_position += strcspn(file2_content + file2_position, "\n");
+        file2_position += strspn(file2_content + file2_position, "\t\n ");
+        strcpy(file2_lines[file2_line_counter++], line);
+    }
+
+    for (int i1 = begin1 - 1, i2 = begin2 - 1; (((i1 < end1) && (i1 < file1_line_counter)) || ((i2 < end2) && (i2 < file2_line_counter))); i1++, i2++)
+    {
+        if ((i1 >= file1_line_counter) || (i1 >= end1))
+        {
+            fprintf(stdout, "-------\n");
+            fprintf(stdout, "File %s - Line %d:\n\n", address1, i1 + 1);
+            fprintf(stdout, "File %s - Line %d:\n" CYAN "%s" COLOR_RESET "\n", address2, i2 + 1, file2_lines[i2]);
+            fprintf(stdout, "-------\n");
+            continue;
+        }
+
+        if ((i2 >= file2_line_counter) || (i2 >= end2))
+        {
+            fprintf(stdout, "-------\n");
+            fprintf(stdout, "File %s - Line %d:\n" YELLLOW "%s" COLOR_RESET "\n", address1, i1 + 1, file1_lines[i1]);
+            fprintf(stdout, "File %s - Line %d:\n\n", address2, i2 + 1);
+            fprintf(stdout, "-------\n");
+            continue;
+        }
+
+        if (strcmp(file1_lines[i1], file2_lines[i2]) != 0)
+        {
+            fprintf(stdout, "-------\n");
+            fprintf(stdout, "File %s - Line %d:\n" YELLLOW "%s" COLOR_RESET "\n", address1, i1 + 1, file1_lines[i1]);
+            fprintf(stdout, "File %s - Line %d:\n" CYAN "%s" COLOR_RESET "\n", address2, i2 + 1, file2_lines[i2]);
+            fprintf(stdout, "-------\n");
+        }
+    }
+
+    return 1;
+}
+
+int add_tag(char tag_name[], char string_id[], char branch_name[], char tag_message[], bool dash_f)
+{
+    char tag_file_address[MAX_PATH_LENGTH];
+    sprintf(tag_file_address, ".kambiz/tags/%s.txt", tag_name);
+    FILE *tag_file = fopen(tag_file_address, "r");
+    bool already_exists = false;
+    if (tag_file != NULL)
+    {
+        already_exists = true;
+        if (!dash_f)
+        {
+            fprintf(stderr, "A tag already exists with this name");
+            return -1;
+        }
+    }
+    fclose(tag_file);
+
+    time_t current_time = time(NULL);
+    char current_time_string[MAX_STRING_LENGTH];
+    strftime(current_time_string, sizeof(current_time_string), "%Y/%m/%d-%H:%M:%S", localtime(&current_time));
+
+    tag_file = fopen(tag_file_address, "w");
+    fprintf(tag_file, "Tag Name: %s\n", tag_name);
+    fprintf(tag_file, "Commit ID: %s\n", string_id);
+    fprintf(tag_file, "Author: %s %s\n", user_name, user_email);
+    fprintf(tag_file, "Time: %s\n", current_time_string);
+    fprintf(tag_file, "Message: %s\n", tag_message);
+    fclose(tag_file);
+
+    if (!already_exists)
+    {
+        fprintf(stdout, "Tag %s was successfully created (Commit-ID: %s)", tag_name, string_id);
+    }
+
+    else
+    {
+        fprintf(stdout, "Tag %s was successfully overwrited (Commit-ID: %s)", tag_name, string_id);
+    }
+
+    return 1;
+}
+
+int show_tag(char tag_name[])
+{
+    char tag_file_address[MAX_PATH_LENGTH];
+    sprintf(tag_file_address, ".kambiz/tags/%s.txt", tag_name);
+    FILE *tag_file = fopen(tag_file_address, "r");
+    if (tag_file == NULL)
+    {
+        fprintf(stderr, "No tag exists with this name");
+        return -1;
+    }
+
+    char line[MAX_STRING_LENGTH];
+    while (fgets(line, MAX_STRING_LENGTH, tag_file) != NULL)
+    {
+        fprintf(stdout, "%s", line);
+    }
+
+    fclose(tag_file);
+    return 1;
+}
+
+int list_tags()
+{
+    DIR *tags_folder = opendir(".kambiz/tags");
+    struct dirent *entry;
+    int tags_count = 0;
+    char tags[100][MAX_STRING_LENGTH];
+
+    while ((entry = readdir(tags_folder)) != NULL)
+    {
+        if ((entry->d_name[0] == '.') || (entry->d_type != DT_REG))
+        {
+            continue;
+        }
+        strcpy(tags[tags_count++], entry->d_name);
+    }
+
+    for (int i = 0; i < tags_count; i++)
+    {
+
+        for (int j = 0; j < tags_count - i - 1; j++)
+        {
+            if (strcmp(tags[j], tags[j + 1]) > 0)
+            {
+                char temp[MAX_STRING_LENGTH];
+                strcpy(temp, tags[j]);
+                strcpy(tags[j], tags[j + 1]);
+                strcpy(tags[j + 1], temp);
+            }
+        }
+    }
+
+    for (int i = 0; i < tags_count; i++)
+    {
+        printf("%s\n", tags[i]);
+    }
+
+    return 1;
+}
+
+int grep(char file_name[], char wanted_word[], char id_string[], char branch_name[], bool dash_n)
+{
+    char file_address[MAX_PATH_LENGTH];
+    sprintf(file_address, ".kambiz/branches/%s/%s/%s", branch_name, id_string, file_name);
+    FILE *file = fopen(file_address, "r");
+
+    if (file == NULL)
+    {
+        fprintf(stderr, "File not found!");
+        return -1;
+    }
+
+    char line[MAX_STRING_LENGTH];
+    int line_count = 0;
+    while (fgets(line, MAX_STRING_LENGTH, file) != NULL)
+    {
+        line_count++;
+        char *word_position = strstr(line, wanted_word);
+        if (word_position != NULL)
+        {
+            char previous_part[MAX_STRING_LENGTH];
+            strncpy(previous_part, line, word_position - line);
+
+            char next_part[MAX_STRING_LENGTH];
+            strcpy(word_position + strlen(wanted_word) + 1, next_part);
+
+            if (dash_n)
+            {
+                fprintf(stdout, "%d ", line_count);
+            }
+            fprintf(stdout, "%s" CYAN "%s" COLOR_RESET "%s\n", previous_part, wanted_word, next_part);
+        }
+    }
+
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 1)
@@ -1424,11 +1705,45 @@ int main(int argc, char **argv)
             fprintf(stderr, "Please enter a message");
             return -1;
         }
-        else if (argc == 4)
+        else if ((argc == 4) && (strcmp(argv[2], "-m") == 0))
         {
             commit(argv[3]);
             return 0;
         }
+        else if ((argc == 4) && (strcmp(argv[2], "-s") == 0))
+        {
+            char message[MAX_STRING_LENGTH];
+            char shortcut_file_address[MAX_PATH_LENGTH];
+            sprintf(shortcut_file_address, ".kambiz/shortcuts/%s.txt", argv[3]);
+            FILE *shortcut_file = fopen(shortcut_file_address, "r");
+            if (shortcut_file == NULL)
+            {
+                fprintf(stderr, "No shortcut exists with this name");
+                return -1;
+            }
+            fscanf(shortcut_file, "%[^\n]s", message);
+            fclose(shortcut_file);
+            commit(message);
+            return 0;
+        }
+    }
+
+    if ((strcmp(argv[1], "set") == 0) && (argc == 6))
+    {
+        set_shortcut(argv[5], argv[3]);
+        return 0;
+    }
+
+    if ((strcmp(argv[1], "replace") == 0) && (argc == 6))
+    {
+        replace_shortcut(argv[5], argv[3]);
+        return 0;
+    }
+
+    if ((strcmp(argv[1], "remove") == 0) && (argc == 4))
+    {
+        remove_shortcut(argv[3]);
+        return 0;
     }
 
     if (strcmp(argv[1], "branch") == 0)
@@ -1570,12 +1885,125 @@ int main(int argc, char **argv)
         }
     }
 
-    if ((strcmp(argv[1], "tag") == 0) && (argc >= 4))
+    if ((strcmp(argv[1], "tag") == 0))
     {
-        if (strcmp(argv[3], "-m") == 0)
+        if (argc == 2)
         {
+            list_tags();
+            return 0;
+        }
+        if ((strcmp(argv[2], "-a") == 0) && (argc >= 4))
+        {
+            bool dash_f = false;
+            if (strcmp(argv[argc - 1], "-f") == 0)
+            {
+                dash_f = true;
+            }
+
+            char message[MAX_STRING_LENGTH] = "";
+            if (argc > 4)
+            {
+                if (strcmp(argv[4], "-m") == 0)
+                {
+                    strcpy(message, argv[5]);
+                }
+            }
+
+            char branch_name[MAX_STRING_LENGTH];
+            char id_string[MAX_STRING_LENGTH];
+            if (strcmp(argv[argc - 2], "-c") == 0)
+            {
+                strcpy(id_string, argv[argc - 1]);
+                FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+                get_value_by_attribute(log_file, id_string, branch_name, 5, 1, false);
+                fclose(log_file);
+            }
+            else if (strcmp(argv[argc - 3], "-c") == 0)
+            {
+                strcpy(id_string, argv[argc - 2]);
+                FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+                get_value_by_attribute(log_file, id_string, branch_name, 5, 1, false);
+                fclose(log_file);
+            }
+            else
+            {
+                strcpy(branch_name, current_branch_name);
+                sprintf(id_string, "%d", find_branch_head_n_id(current_branch_name, 1));
+            }
+
+            add_tag(argv[3], id_string, branch_name, message, dash_f);
+            return 0;
+        }
+
+        if ((strcmp(argv[2], "show") == 0) && (argc == 4))
+        {
+            show_tag(argv[3]);
+            return 0;
         }
     }
+
+    if (strcmp(argv[1], "diff") == 0)
+    {
+        if ((strcmp(argv[2], "-f") == 0) && (argc >= 5))
+        {
+            int begin1 = 1;
+            int begin2 = 1;
+            int end1 = MAX_INT_VALUE;
+            int end2 = MAX_INT_VALUE;
+            if (argc > 5)
+            {
+                if (strcmp(argv[5], "-line1") == 0)
+                {
+                    sscanf(argv[6], "%d-%d", &begin1, &end1);
+                }
+                if (strcmp(argv[argc - 2], "-line2") == 0)
+                {
+                    sscanf(argv[argc - 1], "%d-%d", &begin2, &end2);
+                }
+            }
+
+            file_diff(argv[3], argv[4], begin1, end1, begin2, end2);
+            return 0;
+        }
+
+        if ((strcmp(argv[2], "-c") == 0) && (argc == 5))
+        {
+            //
+        }
+    }
+
+    if ((strcmp(argv[1], "grep") == 0) && (argc >= 6))
+    {
+        char commit_branch[MAX_STRING_LENGTH];
+        char id_string[MAX_STRING_LENGTH];
+
+        if (argc >= 8)
+        {
+            if (strcmp(argv[6], "-c") == 0)
+            {
+                FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+                get_value_by_attribute(log_file, argv[7], commit_branch, 5, 1, false);
+                strcpy(id_string, argv[7]);
+                fclose(log_file);
+            }
+        }
+
+        else
+        {
+            strcpy(commit_branch, current_branch_name);
+            sprintf(id_string, "%d", current_id);
+        }
+
+        bool dash_n = false;
+        if (strcmp(argv[argc - 1], "-n") == 0)
+        {
+            dash_n = true;
+        }
+
+        grep(argv[3], argv[5], id_string, commit_branch, dash_n);
+        return 0;
+    }
+
     fprintf(stderr, "Invalid Command");
     return 0;
 }
