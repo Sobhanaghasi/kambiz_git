@@ -1,5 +1,3 @@
-// To Be Done:
-// Alias Check
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -410,10 +408,6 @@ int init()
     char tags_address[MAX_PATH_LENGTH] = ".kambiz/tags.txt";
     FILE *tags_file = fopen(tags_address, "w");
     fclose(tags_file);
-
-    // char add_log_address[MAX_PATH_LENGTH] = ".kambiz/add_log.txt";
-    // FILE *add_log_file = fopen(add_log_address, "w");
-    // fclose(add_log_file);
 
     char deleting_stage_address[MAX_PATH_LENGTH] = ".kambiz/deleting_stage.txt";
     FILE *deleting_stage_file = fopen(deleting_stage_address, "w");
