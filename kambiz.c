@@ -2126,6 +2126,26 @@ int pre_commit_f(char **file_names, int file_count)
     return 1;
 }
 
+int merge(char branch1_name[], char branch2_name[]){
+    char branch1_address[MAX_PATH_LENGTH] = "";
+    sprintf(branch1_address, ".kambiz/branches/%s/%d", branch1_name, find_branch_head_n_id(branch1_name, 1));
+    DIR* branch1 = opendir(branch1_address);
+    struct dirent* branch1_entry;
+
+    char branch2_address[MAX_PATH_LENGTH] = "";
+    sprintf(branch2_address, ".kambiz/branches/%s/%d", branch2_name, find_branch_head_n_id(branch2_name, 1));
+    DIR* branch2 = opendir(branch2_address);
+    struct dirent* branch2_entry;
+
+    while((branch1_entry = readdir(branch1)) != NULL){
+        //
+    }
+
+    while((branch2_entry = readdir(branch2)) != NULL){
+        //
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 1)
@@ -2623,6 +2643,11 @@ int main(int argc, char **argv)
         }
 
         grep(argv[3], argv[5], id_string, commit_branch, dash_n);
+        return 0;
+    }
+
+    if ((strcmp(argv[1], "merge") == 0) && (argc == 5)){
+        merge(argv[3], argv[4]);
         return 0;
     }
 
