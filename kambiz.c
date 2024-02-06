@@ -19,10 +19,13 @@
 #define MAX_SHORT_COMMAND_LENGTH 50
 #define MAX_INT_VALUE 1000000
 #define MAX_FILE_SIZE 1000000
+#define MAX_FORMAT_LENGTH 10
 
 #define COLOR_RESET "\e[0m"
 #define CYAN "\e[0;36m"
-#define YELLLOW "\e[0;33m"
+#define YELLOW "\e[0;33m"
+#define RED "\e[0;31m"
+#define GREEN "\e[0;32m"
 
 char global_address[MAX_PATH_LENGTH] = "/Users/sobhan/Documents/Kambiz";
 char local_address[MAX_PATH_LENGTH];
@@ -118,6 +121,19 @@ void change_value_by_attribute(FILE *file, char attribute[], char value[], int v
     {
         fprintf(file, "%-100s", value);
     }
+}
+
+int char_counter(char string[], char wanted_char)
+{
+    int count = 0;
+    for (int i = 0; i < strlen(string); i++)
+    {
+        if (string[i] == wanted_char)
+        {
+            count++;
+        }
+    }
+    return count;
 }
 
 void update_user_data()
@@ -379,13 +395,25 @@ int init()
     FILE *aliases_file = fopen(aliases_address, "w");
     fclose(aliases_file);
 
+    char hooks_address[MAX_PATH_LENGTH] = ".kambiz/hooks.txt";
+    FILE *hooks_file = fopen(hooks_address, "w");
+    fprintf(hooks_file, "%-100s%-100s\n", "todo-check", "disabled");
+    fprintf(hooks_file, "%-100s%-100s\n", "eof-blank-space", "disabled");
+    fprintf(hooks_file, "%-100s%-100s\n", "format-check", "disabled");
+    fprintf(hooks_file, "%-100s%-100s\n", "balance-braces", "disabled");
+    fprintf(hooks_file, "%-100s%-100s\n", "file-size-check", "disabled");
+    fprintf(hooks_file, "%-100s%-100s\n", "character-limit", "disabled");
+    fprintf(hooks_file, "%-100s%-100s\n", "static-error-check", "disabled");
+
+    fclose(hooks_file);
+
     char tags_address[MAX_PATH_LENGTH] = ".kambiz/tags.txt";
     FILE *tags_file = fopen(tags_address, "w");
     fclose(tags_file);
 
-    char add_log_address[MAX_PATH_LENGTH] = ".kambiz/add_log.txt";
-    FILE *add_log_file = fopen(add_log_address, "w");
-    fclose(add_log_file);
+    // char add_log_address[MAX_PATH_LENGTH] = ".kambiz/add_log.txt";
+    // FILE *add_log_file = fopen(add_log_address, "w");
+    // fclose(add_log_file);
 
     char deleting_stage_address[MAX_PATH_LENGTH] = ".kambiz/deleting_stage.txt";
     FILE *deleting_stage_file = fopen(deleting_stage_address, "w");
@@ -831,7 +859,40 @@ int reset(char **file_addresses, int file_count)
 
 int reset_undo()
 {
-    printf("Boro dirooz bia");
+    DIR *stage = opendir(".kambiz/stage");
+    struct dirent *entry;
+    time_t last_time = 0;
+    struct dirent *last_entry;
+
+    rewinddir(stage);
+    while ((entry = readdir(stage)) != NULL)
+    {
+        if (((entry->d_type != DT_DIR) && (entry->d_type != DT_REG)) ||
+            (entry->d_name[0] == '.'))
+        {
+            continue;
+        }
+
+        char staged_file_address[MAX_PATH_LENGTH];
+        sprintf(staged_file_address, ".kambiz/stage/%s", entry->d_name);
+
+        struct stat filedata;
+        stat(staged_file_address, &filedata);
+
+        printf("%lu\n", filedata.st_mtime);
+
+        if (filedata.st_mtime > last_time)
+        {
+            last_entry = entry;
+            last_time = filedata.st_mtime;
+        }
+    }
+
+    char command[MAX_FULL_COMMAND_LENGTH];
+    sprintf(command, "rm -r .kambiz/stage/%s", last_entry->d_name);
+    system(command);
+
+    fprintf(stdout, "\"%s\" was successfully removed from staging area", last_entry->d_name);
     return 1;
 }
 
@@ -1354,7 +1415,6 @@ int file_diff(char address1[], char address2[], int begin1, int end1, int begin2
     int file1_line_counter = 0;
     int file1_position = 0;
     file1_position += strspn(file1_content + file1_position, "\t\n ");
-
     while (sscanf(file1_content + file1_position, "%[^\n]s", line) != -1)
     {
         file1_position += strcspn(file1_content + file1_position, "\n");
@@ -1368,7 +1428,6 @@ int file_diff(char address1[], char address2[], int begin1, int end1, int begin2
     file2_position += strspn(file2_content + file2_position, "\t\n ");
     while (sscanf(file2_content + file2_position, "%[^\n]s", line) != -1)
     {
-        printf("%s", line);
         file2_position += strcspn(file2_content + file2_position, "\n");
         file2_position += strspn(file2_content + file2_position, "\t\n ");
         strcpy(file2_lines[file2_line_counter++], line);
@@ -1388,7 +1447,7 @@ int file_diff(char address1[], char address2[], int begin1, int end1, int begin2
         if ((i2 >= file2_line_counter) || (i2 >= end2))
         {
             fprintf(stdout, "-------\n");
-            fprintf(stdout, "File %s - Line %d:\n" YELLLOW "%s" COLOR_RESET "\n", address1, i1 + 1, file1_lines[i1]);
+            fprintf(stdout, "File %s - Line %d:\n" YELLOW "%s" COLOR_RESET "\n", address1, i1 + 1, file1_lines[i1]);
             fprintf(stdout, "File %s - Line %d:\n\n", address2, i2 + 1);
             fprintf(stdout, "-------\n");
             continue;
@@ -1397,9 +1456,61 @@ int file_diff(char address1[], char address2[], int begin1, int end1, int begin2
         if (strcmp(file1_lines[i1], file2_lines[i2]) != 0)
         {
             fprintf(stdout, "-------\n");
-            fprintf(stdout, "File %s - Line %d:\n" YELLLOW "%s" COLOR_RESET "\n", address1, i1 + 1, file1_lines[i1]);
+            fprintf(stdout, "File %s - Line %d:\n" YELLOW "%s" COLOR_RESET "\n", address1, i1 + 1, file1_lines[i1]);
             fprintf(stdout, "File %s - Line %d:\n" CYAN "%s" COLOR_RESET "\n", address2, i2 + 1, file2_lines[i2]);
             fprintf(stdout, "-------\n");
+        }
+    }
+
+    return 1;
+}
+
+int commit_diff(char branch_name1[], char string_id1[], char branch_name2[], char string_id2[])
+{
+    char commit1_folder_address[MAX_PATH_LENGTH];
+    sprintf(commit1_folder_address, ".kambiz/branches/%s/%s", branch_name1, string_id1);
+    DIR *commit1_folder = opendir(commit1_folder_address);
+    struct dirent *commit1_entry;
+
+    char commit2_folder_address[MAX_PATH_LENGTH];
+    sprintf(commit2_folder_address, ".kambiz/branches/%s/%s", branch_name2, string_id2);
+    DIR *commit2_folder = opendir(commit2_folder_address);
+    struct dirent *commit2_entry;
+
+    while ((commit1_entry = readdir(commit1_folder)) != NULL)
+    {
+        if ((commit1_entry->d_name[0] == '.') || (commit1_entry->d_type != DT_REG))
+        {
+            continue;
+        }
+
+        if (search_in_directory(commit2_folder, commit1_entry->d_name, DT_REG) == NULL)
+        {
+            fprintf(stdout, "%s exists in %s, but not in %s\n", commit1_entry->d_name, string_id1, string_id2);
+        }
+
+        else
+        {
+            char commit1_file_address[MAX_PATH_LENGTH];
+            sprintf(commit1_file_address, "%s/%s", commit1_folder_address, commit1_entry->d_name);
+
+            char commit2_file_address[MAX_PATH_LENGTH];
+            sprintf(commit2_file_address, "%s/%s", commit2_folder_address, commit1_entry->d_name);
+
+            file_diff(commit1_file_address, commit2_file_address, 1, MAX_INT_VALUE, 1, MAX_INT_VALUE);
+        }
+    }
+
+    while ((commit2_entry = readdir(commit2_folder)) != NULL)
+    {
+        if ((commit2_entry->d_name[0] == '.') || (commit2_entry->d_type != DT_REG))
+        {
+            continue;
+        }
+
+        if (search_in_directory(commit1_folder, commit2_entry->d_name, DT_REG) == NULL)
+        {
+            fprintf(stdout, "%s exists in %s, but not in %s\n", commit2_entry->d_name, string_id2, string_id1);
         }
     }
 
@@ -1545,6 +1656,482 @@ int grep(char file_name[], char wanted_word[], char id_string[], char branch_nam
     return 1;
 }
 
+int list_hooks()
+{
+    FILE *hooks_file = fopen(".kambiz/hooks.txt", "r");
+    char line[202];
+    while (fgets(line, 202, hooks_file) != NULL)
+    {
+        char hook_id[101];
+        char state[101];
+        sscanf(line, "%100s", hook_id);
+        printf("%s\n", hook_id);
+    }
+    fclose(hooks_file);
+    return 1;
+}
+
+int list_applied_hooks()
+{
+    FILE *hooks_file = fopen(".kambiz/hooks.txt", "r");
+    char line[202];
+    while (fgets(line, 202, hooks_file) != NULL)
+    {
+        char hook_id[101];
+        char state[101];
+        sscanf(line, "%100s", hook_id);
+        sscanf(line + 100, "%100s", state);
+        if (strcmp(state, "enabled") == 0)
+        {
+            printf("%s\n", hook_id);
+        }
+    }
+    fclose(hooks_file);
+    return 1;
+}
+
+int add_hook(char hook_id[])
+{
+    FILE *hooks_file = fopen(".kambiz/hooks.txt", "r+");
+    change_value_by_attribute(hooks_file, hook_id, "enabled", 2, 1, false);
+    fclose(hooks_file);
+    fprintf(stdout, "%s hook was enabled succesfully\n", hook_id);
+    return 1;
+}
+
+int remove_hook(char hook_id[])
+{
+    FILE *hooks_file = fopen(".kambiz/hooks.txt", "r+");
+    change_value_by_attribute(hooks_file, hook_id, "disabled", 2, 1, false);
+    fclose(hooks_file);
+    fprintf(stdout, "%s hook was disabled succesfully\n", hook_id);
+    return 1;
+}
+
+int pre_commit()
+{
+    FILE *hooks_file = fopen(".kambiz/hooks.txt", "r");
+    char line[202];
+    char hook_list[10][100];
+    int hooks_count = 0;
+    while (fgets(line, 202, hooks_file) != NULL)
+    {
+        char hook_id[101];
+        char state[101];
+        sscanf(line, "%100s", hook_id);
+        sscanf(line + 100, "%100s", state);
+        if (strcmp(state, "enabled") == 0)
+        {
+            strcpy(hook_list[hooks_count++], hook_id);
+        }
+    }
+    fclose(hooks_file);
+
+    if (hooks_count == 0)
+    {
+        fprintf(stderr, "No hooks enabled to check");
+        return -1;
+    }
+
+    DIR *stage = opendir(".kambiz/stage");
+    struct dirent *staged_entry;
+    while ((staged_entry = readdir(stage)) != NULL)
+    {
+        if ((staged_entry->d_name[0] == '.') || (staged_entry->d_type != DT_REG))
+        {
+            continue;
+        }
+
+        char staged_file_address[MAX_PATH_LENGTH];
+        sprintf(staged_file_address, ".kambiz/stage/%s", staged_entry->d_name);
+
+        FILE *staged_file = fopen(staged_file_address, "r");
+        char staged_file_content[MAX_FILE_SIZE] = "";
+        char temp;
+        while ((temp = fgetc(staged_file)) != EOF)
+        {
+            strncat(staged_file_content, &temp, 1);
+        }
+        fclose(staged_file);
+
+        char format[MAX_FORMAT_LENGTH] = "";
+        char staged_file_name[MAX_PATH_LENGTH] = "";
+        split_by_chars(staged_entry->d_name, staged_file_name, format, ".");
+
+        struct stat filedata;
+        stat(staged_file_address, &filedata);
+
+        fprintf(stdout, "%s:\n", staged_entry->d_name);
+        for (int i = 0; i < hooks_count; i++)
+        {
+            fprintf(stdout, "%s: ", hook_list[i]);
+            if (strcmp(hook_list[i], "todo-check") == 0)
+            {
+                if (strcmp(format, "txt") == 0)
+                {
+                    if (strstr(staged_file_content, "TODO") == NULL)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0))
+                {
+                    if (strstr(staged_file_content, "//TODO") == NULL)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "eof-blank-space") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0))
+                {
+                    if ((staged_file_content[strlen(staged_file_content) - 1] != ' ') &&
+                        (staged_file_content[strlen(staged_file_content) - 1] != '\t') &&
+                        (staged_file_content[strlen(staged_file_content) - 1] != '\n'))
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "format-check") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0) ||
+                    (strcmp(format, "mp4") == 0) || (strcmp(format, "wav") == 0) || (strcmp(format, "mp3") == 0))
+                {
+                    fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                }
+
+                else
+                {
+                    fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "balance-braces") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0))
+                {
+                    if ((char_counter(staged_file_content, '(') == char_counter(staged_file_content, ')')) &&
+                        (char_counter(staged_file_content, '[') == char_counter(staged_file_content, ']')) &&
+                        (char_counter(staged_file_content, '{') == char_counter(staged_file_content, '}')))
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "file-size-check") == 0)
+            {
+                if (filedata.st_size <= 5242880)
+                {
+                    fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                }
+
+                else
+                {
+                    fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "character-limit") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0))
+                {
+                    if (strlen(staged_file_content) <= 20000)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "static-error-check") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0))
+                {
+                    char command[MAX_FULL_COMMAND_LENGTH];
+                    sprintf(command, "gcc %s -o test 2>/dev/null", staged_entry->d_name);
+                    if (system(command) == 0)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+        }
+    }
+    closedir(stage);
+    return 1;
+}
+
+int pre_commit_f(char **file_names, int file_count)
+{
+    FILE *hooks_file = fopen(".kambiz/hooks.txt", "r");
+    char line[202];
+    char hook_list[10][100];
+    int hooks_count = 0;
+    while (fgets(line, 202, hooks_file) != NULL)
+    {
+        char hook_id[101];
+        char state[101];
+        sscanf(line, "%100s", hook_id);
+        sscanf(line + 100, "%100s", state);
+        if (strcmp(state, "enabled") == 0)
+        {
+            strcpy(hook_list[hooks_count++], hook_id);
+        }
+    }
+    fclose(hooks_file);
+
+    if (hooks_count == 0)
+    {
+        fprintf(stderr, "No hooks enabled to check");
+        return -1;
+    }
+
+    for (int j = 0; j < file_count; j++)
+    {
+        char staged_file_address[MAX_PATH_LENGTH];
+        sprintf(staged_file_address, ".kambiz/stage/%s", file_names[j]);
+
+        FILE *staged_file = fopen(staged_file_address, "r");
+        if (staged_file == NULL)
+        {
+            fprintf(stdout, "%s doesn't exist in staging area", file_names[j]);
+            continue;
+        }
+
+        char staged_file_content[MAX_FILE_SIZE] = "";
+        char temp;
+        while ((temp = fgetc(staged_file)) != EOF)
+        {
+            strncat(staged_file_content, &temp, 1);
+        }
+        fclose(staged_file);
+
+        char format[MAX_FORMAT_LENGTH] = "";
+        char staged_file_name[MAX_PATH_LENGTH] = "";
+        split_by_chars(file_names[j], staged_file_name, format, ".");
+
+        struct stat filedata;
+        stat(staged_file_address, &filedata);
+
+        fprintf(stdout, "%s:\n", file_names[j]);
+        for (int i = 0; i < hooks_count; i++)
+        {
+            fprintf(stdout, "%s: ", hook_list[i]);
+            if (strcmp(hook_list[i], "todo-check") == 0)
+            {
+                if (strcmp(format, "txt") == 0)
+                {
+                    if (strstr(staged_file_content, "TODO") == NULL)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0))
+                {
+                    if (strstr(staged_file_content, "//TODO") == NULL)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "eof-blank-space") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0))
+                {
+                    if ((staged_file_content[strlen(staged_file_content) - 1] != ' ') &&
+                        (staged_file_content[strlen(staged_file_content) - 1] != '\t') &&
+                        (staged_file_content[strlen(staged_file_content) - 1] != '\n'))
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "format-check") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0) ||
+                    (strcmp(format, "mp4") == 0) || (strcmp(format, "wav") == 0) || (strcmp(format, "mp3") == 0))
+                {
+                    fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                }
+
+                else
+                {
+                    fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "balance-braces") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0))
+                {
+                    if ((char_counter(staged_file_content, '(') == char_counter(staged_file_content, ')')) &&
+                        (char_counter(staged_file_content, '[') == char_counter(staged_file_content, ']')) &&
+                        (char_counter(staged_file_content, '{') == char_counter(staged_file_content, '}')))
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "file-size-check") == 0)
+            {
+                if (filedata.st_size <= 5242880)
+                {
+                    fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                }
+
+                else
+                {
+                    fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "character-limit") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0) || (strcmp(format, "txt") == 0))
+                {
+                    if (strlen(staged_file_content) <= 20000)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+
+            else if (strcmp(hook_list[i], "static-error-check") == 0)
+            {
+                if ((strcmp(format, "c") == 0) || (strcmp(format, "cpp") == 0))
+                {
+                    char command[MAX_FULL_COMMAND_LENGTH];
+                    sprintf(command, "gcc %s -o test 2>/dev/null", file_names[j]);
+                    if (system(command) == 0)
+                    {
+                        fprintf(stdout, GREEN "PASSED" COLOR_RESET "\n");
+                    }
+
+                    else
+                    {
+                        fprintf(stdout, RED "FAILED" COLOR_RESET "\n");
+                    }
+                }
+
+                else
+                {
+                    fprintf(stdout, YELLOW "SKIPPED" COLOR_RESET "\n");
+                }
+            }
+        }
+    }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 1)
@@ -1584,7 +2171,7 @@ int main(int argc, char **argv)
     }
 
     // Check Aliases
-    /*char alias_value[MAX_FULL_COMMAND_LENGTH] = "";
+    char alias_value[MAX_FULL_COMMAND_LENGTH] = "";
     FILE *global_aliases = fopen(global_aliases_address, "r");
     get_value_by_attribute(global_aliases, argv[1], alias_value, 1, 1, true);
     fclose(global_aliases);
@@ -1613,7 +2200,7 @@ int main(int argc, char **argv)
             argv[i] = (char *)malloc(strlen(alias_value_words[i]) + 1);
             strcpy(argv[i], alias_value_words[i]);
         }
-    }*/
+    }
 
     if ((strcmp(argv[1], "config") == 0))
     {
@@ -1968,7 +2555,48 @@ int main(int argc, char **argv)
 
         if ((strcmp(argv[2], "-c") == 0) && (argc == 5))
         {
-            //
+            char commit_branch1[MAX_STRING_LENGTH] = "";
+            char commit_branch2[MAX_STRING_LENGTH] = "";
+            FILE *log_file = fopen(".kambiz/branches/commit_log.txt", "r");
+            get_value_by_attribute(log_file, argv[3], commit_branch1, 5, 1, false);
+            get_value_by_attribute(log_file, argv[4], commit_branch2, 5, 1, false);
+            fclose(log_file);
+            commit_diff(commit_branch1, argv[3], commit_branch2, argv[4]);
+            return 0;
+        }
+    }
+
+    if (strcmp(argv[1], "pre-commit") == 0)
+    {
+        if (argc == 2)
+        {
+            pre_commit();
+            return 0;
+        }
+        if (strcmp(argv[2], "-f") == 0)
+        {
+            pre_commit_f(argv + 2, argc - 2);
+            return 0;
+        }
+        if ((strcmp(argv[2], "hooks") == 0) && (strcmp(argv[3], "list") == 0))
+        {
+            list_hooks();
+            return 0;
+        }
+        if ((strcmp(argv[2], "applied") == 0) && (strcmp(argv[3], "hooks") == 0))
+        {
+            list_applied_hooks();
+            return 0;
+        }
+        if ((strcmp(argv[2], "add") == 0) && (strcmp(argv[3], "hook") == 0))
+        {
+            add_hook(argv[4]);
+            return 0;
+        }
+        if ((strcmp(argv[2], "remove") == 0) && (strcmp(argv[3], "hook") == 0))
+        {
+            remove_hook(argv[4]);
+            return 0;
         }
     }
 
